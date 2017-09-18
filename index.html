@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>Keys</title>
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+	<!--
+
+Copyright (c) 2015 Eric Chan
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+	-->
+	<script src="js/noon.js"></script>
+	<script type="text/javascript">
+
+window.onload = function () {
+	"use strict";
+
+	var i, str = '';
+
+	var notes = [];
+	for (i = 0; i < 128; i++) {
+		notes[i] = 55 * Math.pow(2, (i - 33) / 12);
+	}
+
+	var $keys = document.querySelectorAll('.keys span');
+
+	//ZSXDCVGBHNJMQ2W3ER5T6Y7UI9O0P
+	var mapping = {
+		"90": 0,
+		"83": 1,
+		"88": 2,
+		"68": 3,
+		"67": 4,
+		"86": 5,
+		"71": 6,
+		"66": 7,
+		"72": 8,
+		"78": 9,
+		"74": 10,
+		"77": 11,
+		"81": 12,
+		"50": 13,
+		"87": 14,
+		"51": 15,
+		"69": 16,
+		"82": 17,
+		"53": 18,
+		"84": 19,
+		"54": 20,
+		"89": 21,
+		"55": 22,
+		"85": 23,
+		"73": 24,
+		"57": 25,
+		"79": 26,
+		"48": 27,
+		"80": 28,
+
+		"219": 29,
+		"61": 30,
+		"221": 31,
+
+		"188": 12,
+		"76": 13,
+		"190": 14,
+		"59": 15,
+		"191": 16,
+	}
+
+	var actx = new AudioContext();
+	var buft = 0.001;
+
+	var osc = actx.createOscillator();
+	var mgain = actx.createGain();
+	mgain.gain.value = 1;
+	mgain.connect(actx.destination);
+	window.master_gain = mgain;
+
+	var timbres = [
+		'square',
+		'sawtooth',
+		'qsine',
+		'sine',
+		'triangle',
+		'asine',
+		'hsine',
+	], timbre = timbres[0];
+
+	var list = Array(256).join(0).split(0).map(function (n, i) { return i; });
+
+	function bias(b, l) {
+		if (b != 0) {
+			l[0] += b;
+		} else {
+			l[0] = 0;
+		}
+		return l;
+	}
+
+	var timbre_coef = {
+		sine: {
+			re: new Float32Array([0, 0]),
+			im: new Float32Array([0, 1]),
+		},
+		square: {
+			re: new Float32Array(list.length),
+			im: new Float32Array(list.map(function (n) { return (n % 2 == 1)?( 4 / (Math.PI * n)):0; })),
+		},
+		sawtooth: {
+			re: new Float32Array(list.length),
+			im: new Float32Array(bias(0, list.map(function (n) { return 2 / (Math.PI * n); }))),
+		},
+		triangle: {
+			re: new Float32Array(bias(0, list.map(function (n) { return (n % 2 == 1)?( 8 / (Math.PI * Math.PI * n * n)):0; }))),
+			im: new Float32Array(list.length),
+		},
+		asine: {
+			re: new Float32Array(bias(-2 / Math.PI, list.map(function (n) { return 4 / (Math.PI * (1 - 4 * n * n)); }))),
+			im: new Float32Array(list.length),
+		},
+		hsine: {
+			re: new Float32Array(bias(1 / Math.PI, list.map(function (n) { if (n == 1) return -1 / 2; return 2 * Math.cos(Math.PI * n / 2) / Math.PI / (1 - n * n); }))),
+			im: new Float32Array(list.length),
+		},
+		qsine: {
+			re: new Float32Array(bias(-1 / Math.PI, list.map(function (n) { return (2 - 4 * n * Math.sin(Math.PI * n)) / (1 - 4 * n * n) / 2 / Math.PI; }))),
+			im: new Float32Array(list.map(function (n) { return (4 * n * Math.cos(Math.PI * n)) / (1 - 4 * n * n) / 2 / Math.PI; })),
+		},
+	}
+
+	var timbre_wave = {
+		sine: actx.createPeriodicWave(timbre_coef.sine.re, timbre_coef.sine.im),
+		triangle: actx.createPeriodicWave(timbre_coef.triangle.re, timbre_coef.triangle.im),
+		asine: actx.createPeriodicWave(timbre_coef.asine.re, timbre_coef.asine.im),
+		square: actx.createPeriodicWave(timbre_coef.square.re, timbre_coef.square.im),
+		sawtooth: actx.createPeriodicWave(timbre_coef.sawtooth.re, timbre_coef.sawtooth.im),
+		hsine: actx.createPeriodicWave(timbre_coef.hsine.re, timbre_coef.hsine.im),
+		qsine: actx.createPeriodicWave(timbre_coef.qsine.re, timbre_coef.qsine.im),
+	}
+
+	// ----
+
+	var synth_free_pool = [];
+	var synth_playing_pool = [];
+	var synth_decay_pool = [];
+
+	function create_synth() {
+		var osc = actx.createOscillator();
+		var gain = actx.createGain();
+		osc.connect(gain);
+		osc.start();
+		gain.gain.value = 0.001;
+		gain.connect(/*actx.destination*/mgain);
+		return [osc, gain];
+	}
+
+	function sweep_decay_pool(t) {
+		while (synth_decay_pool.length > 0 && synth_decay_pool[0][5] < t) {
+			var synth = synth_decay_pool.shift();
+			//synth[1].gain.value = 0.001;
+			//synth_free_pool.push(synth);
+			synth[0].disconnect();
+			synth[1].disconnect();
+			synth[0] = null;
+			synth[1] = null;
+		}
+	}
+
+	function note_on(ch, key, volume, timbre) {
+		var synth;
+		var wave = timbre_wave[timbre]; //actx.createPeriodicWave(timbre_coef[timbre].re, timbre_coef[timbre].im);
+		var t = actx.currentTime + buft;
+
+		if (synth_free_pool.length > 1) {
+			synth = synth_free_pool.shift();
+		} else {
+			synth = create_synth();
+		}
+
+		synth[2] = ch;
+		synth[3] = key;
+		synth[4] = volume;
+		synth[5] = t + 0.05;
+
+		// setValueAtTime(v, t)
+		// linearRampToValueAtTime(v, t)
+		// exponentialRampToValueAtTime(v, t)
+
+		//synth[1].gain.value = 0;
+		synth[0].setPeriodicWave(wave);
+		//synth[0].frequency.value = notes[key];
+		synth[0].frequency.setValueAtTime(notes[key], t);
+		//synth[1].gain.value = 0.2 * synth[4] / 127;
+		synth[1].gain.setValueAtTime(0.2 * synth[4] / 127, t);
+		synth[1].gain.exponentialRampToValueAtTime(0.12 * synth[4] / 127, synth[5]);
+
+		synth_playing_pool.push(synth);
+	}
+
+	function note_off(ch, key, volume) {
+		var i;
+		for (i = 0; i < synth_playing_pool.length; i++) {
+			var synth = synth_playing_pool[i];
+			if ((synth[2] == ch) && (synth[3] == key)) {
+				var t = actx.currentTime + buft;
+				var exp = Math.max(synth[5], t);
+				synth[5] = exp + 0.1;
+				//synth[1].gain.exponentialRampToValueAtTime(0.001 * synth[4] / 127, exp + 0.1);
+				synth[1].gain.linearRampToValueAtTime(0, synth[5]);
+				//synth[2] = undefined;
+				//synth[3] = undefined;
+				//synth[4] = undefined;
+				synth_decay_pool.push(synth_playing_pool.splice(i, 1)[0]);
+
+				synth[0].stop(synth[5]);
+				//synth[1].stop(synth[5]);
+				return;
+			}
+		}
+		//console.log('unpaired off', ch, key);
+	}
+
+	function playnote(key, timbre) {
+		note_on(0, key, 127, timbre);
+		note_off(0, key, 127);
+		sweep_decay_pool(actx.currentTime);
+	}
+
+	function all_off() {
+		console.log('all_off');
+		while (synth_playing_pool.length > 0) {
+			note_off(synth_playing_pool[0][2], synth_playing_pool[0][3], 0);
+		}
+	}
+
+	// ----
+
+	var shift = 0;
+
+	var keyst = [];
+	var recording = null;
+
+	window.onkeydown = function(e) {
+		var key = e.keyCode;
+
+		if (key == 16) {
+			shift += 12;
+		}
+		if (key == 18) {
+			shift -= 12;
+		}
+		if (key == 9) {
+			timbre = timbres[(timbres.indexOf(timbre) + 1) % timbres.length];
+			e.preventDefault();
+		}
+
+		if (mapping.hasOwnProperty(key)) {
+			e.preventDefault();
+			if (!keyst[key]) {
+				keyst[key] = mapping[key] + 60 + shift;
+				var now = new Date().getTime();
+				recording && recording.push({ time: now, command: [0x90, keyst[key], 127], });
+				note_on(0, keyst[key], 127, timbre);
+				$keys[keyst[key]].classList.add('activekeyed');
+			}
+			//playnote(mapping[key] + 60 + shift, timbre);
+		}
+	}
+	window.onkeyup = function(e) {
+		var key = e.keyCode;
+
+		if (key == 16) {
+			shift -= 12;
+		}
+		if (key == 18) {
+			shift += 12;
+		}
+
+		if (mapping.hasOwnProperty(key)) {
+			e.preventDefault();
+			if (keyst[key]) {
+				var now = new Date().getTime();
+				recording && recording.push({ time: now, command: [0x80, keyst[key], 0], });
+				note_off(0, keyst[key], 127);
+				$keys[keyst[key]].classList.remove('activekeyed');
+				keyst[key] = undefined;
+			}
+		}
+	}
+
+	for (i = 0; i < $keys.length; i++) {
+		(function (i) {
+			$keys[i].onmousedown = function () {
+				playnote(i, timbre);
+			}
+		}(i))
+	}
+
+	// file things
+
+	window.ondragover = function (e) {
+		e.stopPropagation();
+		e.preventDefault();
+		e.dataTransfer.dropEffect = 'copy';
+	}
+
+	window.ondrop = function (e) {
+		e.stopPropagation();
+		e.preventDefault();
+
+		var files = e.dataTransfer.files; // FileList object.
+
+		var i;
+
+		for (i = 0; i < files.length; i++) {
+			(function (i) {
+				var reader = new FileReader();
+				reader.onload = function () {
+					console.log('dropped', files[i].name);
+					var mysong = Noon.decode(reader.result);
+
+					var encoding = Noon.encode(mysong);
+					var url = URL.createObjectURL(new Blob([encoding], {type: 'audio/midi'}));
+					//document.querySelector('.status').innerHTML = url.link(url);
+
+					//window.song = mysong;
+					//do_it(song);
+
+					var list = document.createElement('li');
+					document.querySelector('.status').appendChild(list);
+
+					var $new = document.querySelector('#newrecording');
+					$new.parentNode.insertBefore(list, $new);
+
+					var el = document.createElement('span');
+					el.innerHTML = files[i].name.link(url);
+					list.appendChild(el);
+
+					var el = document.createElement('button');
+					el.innerHTML = 'Play this Track'; // '&#x25b6;';
+					el.onclick = function () { do_it(mysong); console.log(mysong); };
+					list.appendChild(el);
+
+					var el = document.createElement('button');
+					el.innerHTML = 'copy to <code>window.song</code>';
+					el.onclick = function () { window.song = mysong; };
+					list.appendChild(el);
+				}
+
+				reader.readAsArrayBuffer(files[i]);
+			}(i))
+		}
+	}
+
+	var songid = 0;
+
+	function create_player(song) {
+		// fold all tracks into one
+		var track = [].concat.apply([], song.tracks).sort(function (a, b) {
+			return b.time < a.time; 
+		});
+
+		// keep only the events this player can handle
+		track = track.filter(function (e) {
+			return e.command && (
+				(((e.command[0] & 0xe0) == 0x80) && ((e.command[0] & 0xf) != 9)) ||
+				(e.command[0] == 0xff)
+			);
+		});
+
+		var interval;
+		var pos = 0;
+		var time = 0;
+		var mtempo = 1000000 * 60 / 120; // µsec / qnote
+		var divs = song.divisions; // midi time / qnote
+		var lastrtime = 0;
+
+		function step() {
+			var i;
+			//var rtime = actx.currentTime;
+			var rtime = new Date().getTime();
+			time += (rtime - lastrtime) * 1000.000 * divs / mtempo;
+			lastrtime = rtime;
+
+			var tcount = 0;
+
+			// play all events between where we left off last time (pos) and now (time)
+			while (pos < track.length && track[pos].time <= time) {
+				tcount++;
+				var cmd = track[pos++];
+
+				// play a note
+				if ((cmd.command[0] & 0xf0) == 0x90) {
+					if (cmd.command[2] > 0) {
+						note_on(cmd.command[0] & 0xf, cmd.command[1], cmd.command[2], timbre); //asine
+						$keys[cmd.command[1]].classList.add('active');
+					} else {
+						note_off(cmd.command[0] & 0xf, cmd.command[1], cmd.command[2]);
+						$keys[cmd.command[1]].classList.remove('active');
+					}
+					continue;
+				}
+
+				// stop a note
+				if ((cmd.command[0] & 0xf0) == 0x80) {
+					note_off(cmd.command[0] & 0xf, cmd.command[1], cmd.command[2]);
+					$keys[cmd.command[1]].classList.remove('active');
+					continue;
+				}
+
+				// tempo
+				if ((cmd.command[0] == 0xff) && (cmd.command[1] == 0x51)) {
+					console.assert(cmd.command[2] == 3, 'bad tempo length');
+					mtempo = (cmd.command[3] << 16) | (cmd.command[4] << 8) | (cmd.command[5]);
+					console.log('tempo', Math.round(60000000 / mtempo));
+					continue;
+				}
+
+				// unknown global command
+				if ((cmd.command[0] == 0xff) && (cmd.command[1] != 0x51)) {
+					console.log(cmd.command[1], String.fromCharCode.apply(undefined, cmd.command.slice(3/*, 3 + cmd.command[2]*/)));
+					continue;
+				}
+			}
+
+			// clear any notes that have finished their decay
+			sweep_decay_pool(actx.currentTime);
+
+			document.title = tcount || document.title;
+
+			// is this track done?
+			if (pos >= track.length) {
+				stop();
+			}
+		}
+
+		function play() {
+			if (pos >= track.length) {
+				pos = 0;
+			}
+			lastrtime = new Date().getTime();
+			if (!interval) {
+				interval = setInterval(step, 10);
+			}
+		}
+
+		function pause() {
+			if (interval) {
+				interval = clearInterval(interval);
+			}
+
+			for (i = 0; i < 128; i++) {
+				$keys[i].classList.remove('active');
+			}
+			all_off();
+
+			lastrtime = 0;
+		}
+
+		function stop() {
+			pause();
+			pos = Infinity;
+		}
+
+		return {
+			play: play,
+			pause: pause,
+			stop: stop,
+		};
+	}
+
+	var player;
+
+	function do_it(song) {
+		if (player) {
+			player.stop();
+		}
+
+		player = create_player(song);
+		player.play();
+		return;
+	}
+
+	function saverecording() {
+		var mysong = Noon.create();
+		recording = recording.sort(function (a, b) {
+			return b.time < a.time; 
+		});
+
+		if (recording.length > 0) {
+			var start = recording[0].time;
+			var events = recording.map(function(evt) { evt.time -= start; return evt; });
+
+			mysong.tracks[0] = mysong.tracks[0].concat(events);
+		}
+
+		var encoding = Noon.encode(mysong);
+
+		var url = URL.createObjectURL(new Blob([encoding], {type: 'audio/midi'}));
+
+		var el = document.createElement('span');
+		el.innerHTML = 'Download'.link(url);
+		this.parentNode.appendChild(el);
+
+		var el = document.createElement('button');
+		el.innerHTML = 'Play this Track';
+		el.onclick = function () { do_it(mysong); console.log(mysong); };
+		this.parentNode.appendChild(el);
+
+		this.parentNode.removeChild(this);
+
+		recording = null;
+	}
+
+	function startrecording() {
+		recording = [];
+
+		var $new = document.querySelector('#newrecording');
+		var $line = document.createElement('li');
+		var $save = document.createElement('button');
+		$save.innerHTML = 'Now Recording... Click here to Stop and Save'; // '💾';
+		$save.onclick = saverecording;
+
+		$line.appendChild($save);
+		$new.parentNode.insertBefore($line, $new);
+	}
+
+	document.querySelector('#newrecording').onclick = startrecording;
+}
+
+	</script>
+	<style type="text/css">
+body {
+	transition: 0.2s background-color;
+}
+
+body.flash {
+	transition: 0s background-color;
+	background-color: #bbb;
+}
+
+.keys_wrapper {
+	text-align: center;
+	overflow: hidden;
+	background-color: #bbb;
+}
+
+.keys {
+	display: inline-block;
+	white-space: nowrap;
+	margin-left: -512px;
+	margin-right: -512px;
+}
+
+.keys span {
+	vertical-align: top;
+	display: inline-block;
+	box-sizing: border-box;
+	height: 128px;
+	width: 16px;
+	background-color: white;
+	border: 1px solid black;
+	transition: 0.1s box-shadow;
+
+	box-shadow: 0 0 0 8px white inset;
+} 
+
+.keys span:nth-child(12n+2),
+.keys span:nth-child(12n+4),
+.keys span:nth-child(12n+7),
+.keys span:nth-child(12n+9),
+.keys span:nth-child(12n+11) {
+	margin-left: -6px;
+	margin-right: -6px;
+	width: 12px;
+	height: 80px;
+	background-color: black;
+	z-index: 1;
+	position: relative;
+
+	box-shadow: 0 0 0 8px black inset;
+}
+
+/*
+.keys span {
+	display: none;
+}
+.keys span:nth-child(48) ~ span {
+	display: inline-block;
+}
+*/
+
+.keys span.active {
+	box-shadow: 0 0 0 8px red inset;
+	transition: 0s box-shadow;
+}
+
+.keys span.activekeyed {
+	box-shadow: 0 0 0 8px blue inset;
+	transition: 0s box-shadow;
+}
+
+.keys span.active.activekeyed {
+	box-shadow: 0 0 0 8px magenta inset;
+}
+
+h1 {
+	font: bold 36pt Tahoma,Verdana,sans-serif;
+	text-align: center;
+	color: white;
+	text-shadow:
+		0 1px 0 #CCCCCC,
+		0 2px 0 #BBBBBB,
+		0 3px 0 #AAAAAA,
+		0 4px 0 #999999,
+		0 5px 0 #888888,
+		0 6px 0 #777777,
+		0 7px 0 #666666,
+		0 8px 0 #555555,
+		0 9px 0 #444444,
+		0 7px 1px #000,
+		0 7px 2px #000,
+		0 7px 3px #000,
+		0 7px 5px #000,
+		0 7px 8px #000,
+		0 7px 13px #000;
+}
+	</style>
+</head>
+<body>
+<h1>Quaver Time!!!</h1>
+<p id="d"></p>
+<div class="keys_wrapper">
+<div class="keys">
+<span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+</div>
+</div>
+
+<p class="status"></p>
+<p class="text"></p>
+
+
+<h2>Recordings</h2>
+<ul id="recordinglist">
+	<li><button id="newrecording">New...</button></li>
+</ul>
+
+</body>
+</html>
