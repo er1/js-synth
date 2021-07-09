@@ -3,6 +3,7 @@
 <head>
 	<title>Keys</title>
 	<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
 	<!--
 
 Copyright (c) 2015 Eric Chan
@@ -298,8 +299,33 @@ window.onload = function () {
 			$keys[i].onmousedown = function () {
 				playnote(i, timbre);
 			}
+
+			$keys[i].ontouchstart = function (e) {
+				e.preventDefault();
+				note_on(0, i, 127, timbre);
+				var now = new Date().getTime();
+				recording && recording.push({ time: now, command: [0x90, i, 127], });
+			}
+			$keys[i].ontouchcancel = $keys[i].ontouchend = function (e) {
+				e.preventDefault();
+				note_off(0, i, 127);
+				var now = new Date().getTime();
+				recording && recording.push({ time: now, command: [0x80, i, 0], });
+				sweep_decay_pool(actx.currentTime);
+			}
 		}(i))
 	}
+
+	var $timbrelist = document.querySelector('#timbrelist');
+
+	timbres.forEach(function (t) {
+		var button = $timbrelist.appendChild(document.createElement('li')).appendChild(document.createElement('button'));
+		button.type = 'button';
+		button.textContent = t;
+		button.addEventListener('click', function () {
+			timbre = t;
+		});
+	})
 
 	// file things
 
@@ -307,6 +333,43 @@ window.onload = function () {
 		e.stopPropagation();
 		e.preventDefault();
 		e.dataTransfer.dropEffect = 'copy';
+	}
+
+	function load_file(file) {
+		var reader = new FileReader();
+		reader.onload = function () {
+			console.log('dropped', file.name);
+			var mysong = Noon.decode(reader.result);
+
+			var encoding = Noon.encode(mysong);
+			var url = URL.createObjectURL(new Blob([encoding], {type: 'audio/midi'}));
+			//document.querySelector('.status').innerHTML = url.link(url);
+
+			//window.song = mysong;
+			//do_it(song);
+
+			var list = document.createElement('li');
+			document.querySelector('.status').appendChild(list);
+
+			var $new = document.querySelector('#newrecording');
+			$new.parentNode.insertBefore(list, $new);
+
+			var el = document.createElement('span');
+			el.innerHTML = file.name.link(url);
+			list.appendChild(el);
+
+			var el = document.createElement('button');
+			el.innerHTML = 'Play this Track'; // '&#x25b6;';
+			el.onclick = function () { do_it(mysong); console.log(mysong); };
+			list.appendChild(el);
+
+			var el = document.createElement('button');
+			el.innerHTML = 'copy to <code>window.song</code>';
+			el.onclick = function () { window.song = mysong; };
+			list.appendChild(el);
+		}
+
+		reader.readAsArrayBuffer(file);
 	}
 
 	window.ondrop = function (e) {
@@ -318,44 +381,21 @@ window.onload = function () {
 		var i;
 
 		for (i = 0; i < files.length; i++) {
-			(function (i) {
-				var reader = new FileReader();
-				reader.onload = function () {
-					console.log('dropped', files[i].name);
-					var mysong = Noon.decode(reader.result);
-
-					var encoding = Noon.encode(mysong);
-					var url = URL.createObjectURL(new Blob([encoding], {type: 'audio/midi'}));
-					//document.querySelector('.status').innerHTML = url.link(url);
-
-					//window.song = mysong;
-					//do_it(song);
-
-					var list = document.createElement('li');
-					document.querySelector('.status').appendChild(list);
-
-					var $new = document.querySelector('#newrecording');
-					$new.parentNode.insertBefore(list, $new);
-
-					var el = document.createElement('span');
-					el.innerHTML = files[i].name.link(url);
-					list.appendChild(el);
-
-					var el = document.createElement('button');
-					el.innerHTML = 'Play this Track'; // '&#x25b6;';
-					el.onclick = function () { do_it(mysong); console.log(mysong); };
-					list.appendChild(el);
-
-					var el = document.createElement('button');
-					el.innerHTML = 'copy to <code>window.song</code>';
-					el.onclick = function () { window.song = mysong; };
-					list.appendChild(el);
-				}
-
-				reader.readAsArrayBuffer(files[i]);
-			}(i))
+			load_file(files[i]);
 		}
 	}
+
+	document.querySelector('#file_upload').addEventListener('change', function (e) {
+		var files = e.target.files;
+
+		var i;
+
+		for (i = 0; i < files.length; i++) {
+			load_file(files[i]);
+		}
+
+		e.target.value = '';
+	})
 
 	var songid = 0;
 
@@ -649,6 +689,12 @@ h1 {
 <ul id="recordinglist">
 	<li><button id="newrecording">New...</button></li>
 </ul>
+
+<h2>Waveform List</h2>
+<ul id="timbrelist"></ul>
+
+<h2>Open a Saved Recording</h2>
+<input type="file" id="file_upload">
 
 </body>
 </html>
