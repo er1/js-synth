@@ -295,8 +295,16 @@ window.onload = function () {
 
 	for (i = 0; i < $keys.length; i++) {
 		(function (i) {
-			$keys[i].onmousedown = function () {
+			/*$keys[i].onmousedown = function () {
 				playnote(i, timbre);
+			}*/
+			$keys[i].ontouchstart = function (e) {
+				e.preventDefault();
+				note_on(0, i, 127, timbre);
+			}
+			$keys[i].ontouchend = function (e) {
+				e.preventDefault();
+				note_off(0, i, 127);
 			}
 		}(i))
 	}
@@ -342,13 +350,12 @@ window.onload = function () {
 					list.appendChild(el);
 
 					var el = document.createElement('button');
-					el.innerHTML = 'Play this Track'; // '&#x25b6;';
-					el.onclick = function () { do_it(mysong); console.log(mysong); };
-					list.appendChild(el);
-
-					var el = document.createElement('button');
-					el.innerHTML = 'copy to <code>window.song</code>';
-					el.onclick = function () { window.song = mysong; };
+					el.textContent = 'Play this Track';
+					el.onclick = function () {
+						do_it(mysong);
+						window.song = mysong;
+						console.log('window.song set to current track');
+					};
 					list.appendChild(el);
 				}
 
@@ -535,19 +542,37 @@ window.onload = function () {
 
 	</script>
 	<style type="text/css">
-body {
-	transition: 0.2s background-color;
+* {
+	margin: 0;
+	border: 0;
+	padding: 0;
+	font: inherit;
+	box-sizing: inherit;
+	color: inherit;
+	text-decoration: inherit;
 }
 
-body.flash {
-	transition: 0s background-color;
-	background-color: #bbb;
+body {
+	box-sizing: border-box;
+	background-color: #333;
+	color: #ddd;
+}
+
+button {
+	padding: 0.25em 0.5em;
+	border-radius: 4px;
+	background-color: #529;
+	transition: 0.4s background-color;
+}
+
+button:active, button:hover, button:focus {
+	background-color: #85c;
+	transition: 0.1s background-color;
 }
 
 .keys_wrapper {
 	text-align: center;
 	overflow: hidden;
-	background-color: #bbb;
 }
 
 .keys {
@@ -564,10 +589,11 @@ body.flash {
 	height: 128px;
 	width: 16px;
 	background-color: white;
-	border: 1px solid black;
 	transition: 0.1s box-shadow;
+	margin-left: 1px;
+	margin-right: 1px;
 
-	box-shadow: 0 0 0 8px white inset;
+	-x-box-shadow: 0 0 0 8px white inset;
 } 
 
 .keys span:nth-child(12n+2),
@@ -582,8 +608,12 @@ body.flash {
 	background-color: black;
 	z-index: 1;
 	position: relative;
+	border-left: 2px solid #333;
+	border-right: 2px solid #333;
+	border-bottom: 2px solid #333;
 
-	box-shadow: 0 0 0 8px black inset;
+
+	box-shadow: 0 0 0 1px #bbb inset;
 }
 
 /*
